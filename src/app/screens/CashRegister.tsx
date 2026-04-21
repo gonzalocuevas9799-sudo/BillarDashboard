@@ -33,6 +33,7 @@ export function CashRegister() {
   };
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [cashDifference, setCashDifference] = useState('');
+  const [showExportOptions, setShowExportOptions] = useState(false);
 
   const tableSales = sales.filter((s) => s.type === 'table');
   const posSales = sales.filter((s) => s.type === 'pos');
@@ -75,38 +76,61 @@ export function CashRegister() {
     return `${hours}h ${minutes}m`;
   };
 
-  const handleExport = () => {
-    const csvHeader = 'Fecha,Tipo,Mesa,Productos,Tiempo,Total\\n';
-    
-    let csvContent = csvHeader;
-    
-    // Table sales
-    tableSales.forEach(sale => {
-      const tableName = getTableName(sale, tables);
+  // FORMATO 1: Para Base de Datos (Estructura plana, una fila por venta)
+  const exportRawCSV = () => {
+    const excelMagic = 'sep=,\r\n';
+    const csvHeader = 'Fecha,Tipo,Mesa,Productos,Tiempo,Total\r\n';
+    let csvContent = excelMagic + csvHeader;
+
+    sales.forEach(sale => {
+      const tableName = getTableName(sale, tables) || 'N/A';
       const timeStr = sale.tableTime ? formatTime(sale.tableTime) : '';
-      const productsStr = sale.items.map(item => `${item.quantity}x ${item.name}`).join(', ');
-      csvContent += `"${formatDate(sale.timestamp)}","Renta Mesa + Productos","${tableName}","${productsStr}","${timeStr}","$${sale.total.toFixed(2)}\\n`;
+      const productsStr = sale.items.map(item => `${item.quantity}x ${item.name}`).join(' - ');
+      
+      csvContent += `"${formatDate(sale.timestamp)}","${sale.type === 'table' ? 'Mesa' : 'Venta Directa'}","${tableName}","${productsStr}","${timeStr}","${sale.total.toFixed(2)}"\r\n`;
     });
-    
-    // POS sales
-    posSales.forEach(sale => {
-      const productsStr = sale.items.map(item => `${item.quantity}x ${item.name}`).join(', ');
-      csvContent += `"${formatDate(sale.timestamp)}","Venta Directa","N/A","${productsStr}","",$${sale.total.toFixed(2)}\\n`;
+
+    downloadFile(csvContent, 'base_datos_ventas');
+  };
+
+  // FORMATO 2: Tipo Recibo (Estructura visual, productos hacia abajo)
+  const exportReceiptCSV = () => {
+    const excelMagic = 'sep=,\r\n';
+    const csvHeader = 'Detalle,Cantidad,Precio,Subtotal\r\n';
+    let csvContent = excelMagic + csvHeader;
+
+    sales.forEach(sale => {
+      const tableName = sale.type === 'table' ? `Mesa ${getTableName(sale, tables)}` : 'Venta Directa';
+      
+      // Encabezado de la venta
+      csvContent += `"${formatDate(sale.timestamp)} - ${tableName}","","",""\r\n`;
+      
+      // Listado de productos
+      sale.items.forEach(item => {
+        csvContent += `"${item.name}","${item.quantity}","$${item.price.toFixed(2)}","$${(item.price * item.quantity).toFixed(2)}"\r\n`;
+      });
+
+      if (sale.tableTime) csvContent += `"Tiempo de mesa","","","${formatTime(sale.tableTime)}"\r\n`;
+      
+      csvContent += `,"","TOTAL VENTA:","$${sale.total.toFixed(2)}"\r\n`;
+      csvContent += `\r\n`; // Espacio entre ventas
     });
-    
-    // Summary row
-    csvContent += `"${new Date().toLocaleDateString('es-MX')}","","Total General: $${dailyEarnings.toFixed(2)}","","","$${dailyEarnings.toFixed(2)}"\\n`;
-    
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
+
+    csvContent += `\r\n,"","TOTAL DÍA:","$${dailyEarnings.toFixed(2)}"\r\n`;
+    downloadFile(csvContent, 'reporte_recibos');
+  };
+
+  // Función genérica para descargar
+  const downloadFile = (content: string, fileName: string) => {
+    const blob = new Blob(["\ufeff" + content], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `corte_caja_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${fileName}_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success('CSV exportado exitosamente');
+    toast.success('Archivo generado correctamente');
   };
 
   const statsCards = [
@@ -160,12 +184,43 @@ export function CashRegister() {
           <div className="flex gap-3">
             <Button
               variant="outline"
-              onClick={handleExport}
+              onClick={() => setShowExportOptions(true)}
               className="border-zinc-700 text-zinc-400 hover:text-white"
             >
               <Download className="w-4 h-4 mr-2" />
               Exportar
             </Button>
+            {/*Modal para la selección de formato de exportación*/}
+            <Dialog open={showExportOptions} onOpenChange={setShowExportOptions}>
+              <DialogContent className="bg-zinc-900 border-zinc-800 text-white">
+                <DialogHeader>
+                  <DialogTitle>Selecciona el formato de exportación</DialogTitle>
+                  <DialogDescription className="text-zinc-400">
+                    Elige como quieres exportar el reporte de ventas del día.
+                  </DialogDescription>
+                </DialogHeader>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                <Button
+                  onClick={() => { exportReceiptCSV(); setShowExportOptions(false); }}
+                  className="bg-zinc-800 hover:bg-zing-700 text-white font-semibold shadow-lg shadow-blue-500/30"
+                >
+                <div className="flex items-center gap-2">
+                  <Download className="w-4 h-4" />
+                  Formato Recibo
+                </div>
+                </Button>
+                 <Button
+                    onClick={() => { exportRawCSV(); setShowExportOptions(false); }}
+                    className="bg-zinc-800 hover:bg-zing-700 text-white font-semibold shadow-lg shadow-blue-500/30"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Download className="w-4 h-4" />
+                      Formato Crudo
+                    </div>
+                  </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
             <Button
               onClick={() => setShowCloseModal(true)}
               disabled={sales.length === 0}
