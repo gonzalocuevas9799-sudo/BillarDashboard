@@ -1,14 +1,15 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import {
   Clock,
   Plus,
   Minus,
-  Trash2,
   DollarSign,
   Receipt,
   ArrowLeft,
+  CheckCircle,
+  Printer,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Layout } from '../components/Layout';
@@ -35,7 +36,167 @@ export function TableSession() {
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [quantity, setQuantity] = useState(1);
 
+  // Receipt state — stores a snapshot of the session when "Finalizar" is pressed
+  const [receipt, setReceipt] = useState<{
+    tableName: string;
+    tableType: TableType;
+    elapsedSeconds: number;
+    products: { name: string; price: number; quantity: number }[];
+    tableCost: number;
+    productsCost: number;
+    totalCost: number;
+    endTime: Date;
+  } | null>(null);
+
   const table = tables.find((t) => t.id === Number(tableId));
+
+  const formatTime = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return `${hours.toString().padStart(2, '0')}:${minutes
+      .toString()
+      .padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Show receipt modal if we have a snapshot (session already ended)
+  if (receipt) {
+    return (
+      <Layout>
+        <Dialog open={true} onOpenChange={() => {}}>
+          <DialogContent
+            className="bg-zinc-950 border-zinc-800 max-w-md w-full p-0 overflow-hidden"
+            onPointerDownOutside={(e) => e.preventDefault()}
+          >
+            {/* Header */}
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-gradient-to-r from-green-600 to-emerald-600 px-6 py-5"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/20 rounded-full">
+                  <CheckCircle className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">Sesión Finalizada</h2>
+                  <p className="text-green-100 text-sm">
+                    {receipt.endTime.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                    {' — '}
+                    {receipt.endTime.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Ticket Body */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.15 }}
+              className="px-6 py-5 space-y-5"
+            >
+              {/* Table info */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-zinc-400 text-xs uppercase tracking-widest">Mesa</p>
+                  <p className="text-white text-2xl font-bold">{receipt.tableName}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-zinc-400 text-xs uppercase tracking-widest">Tipo</p>
+                  <p className="text-zinc-300 font-semibold capitalize">{receipt.tableType}</p>
+                </div>
+              </div>
+
+              <div className="border-t border-dashed border-zinc-700" />
+
+              {/* Time */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-green-400" />
+                  <span className="text-zinc-300 text-sm">Tiempo total</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-white font-mono font-bold">{formatTime(receipt.elapsedSeconds)}</span>
+                  <p className="text-zinc-500 text-xs">
+                    ${getTableRate(receipt.tableType)}/hr → ${receipt.tableCost.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Products */}
+              {receipt.products.length > 0 && (
+                <>
+                  <div className="border-t border-dashed border-zinc-700" />
+                  <div>
+                    <p className="text-zinc-400 text-xs uppercase tracking-widest mb-3">Productos consumidos</p>
+                    <div className="space-y-2">
+                      {receipt.products.map((item, idx) => (
+                        <motion.div
+                          key={idx}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.2 + idx * 0.05 }}
+                          className="flex items-center justify-between"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-zinc-500 text-sm tabular-nums w-5 text-right">{item.quantity}×</span>
+                            <span className="text-zinc-300 text-sm">{item.name}</span>
+                          </div>
+                          <span className="text-white text-sm font-medium">${(item.price * item.quantity).toFixed(2)}</span>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div className="border-t border-dashed border-zinc-700" />
+
+              {/* Subtotals */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-400">Tiempo de mesa</span>
+                  <span className="text-zinc-300">${receipt.tableCost.toFixed(2)}</span>
+                </div>
+                {receipt.productsCost > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-400">Productos</span>
+                    <span className="text-zinc-300">${receipt.productsCost.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Total */}
+              <div className="bg-gradient-to-r from-purple-500/10 to-purple-600/10 border border-purple-500/30 rounded-xl p-4 flex items-center justify-between">
+                <span className="text-white font-bold text-lg">TOTAL</span>
+                <span className="text-3xl font-bold text-purple-400">${receipt.totalCost.toFixed(2)}</span>
+              </div>
+            </motion.div>
+
+            {/* Footer */}
+            <div className="px-6 pb-6">
+              <Button 
+                onClick={()=> window.print}
+                variant="outline"
+                className="w-full mb-3 bg-green-500 hover:bg-green-600 text-black font-bold text-base py-6"
+                >
+                  <Printer className="w-5 h-5 mr-2" />
+                  Imprimir Ticket
+              </Button>
+              <Button
+                onClick={() => navigate('/tables')}
+                className="w-full bg-green-500 hover:bg-green-600 text-black font-bold text-base py-6"
+              >
+                <Receipt className="w-5 h-5 mr-2" />
+                Cerrar y volver a Mesas
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </Layout>
+    );
+  }
 
   if (!table || table.status !== 'occupied') {
     return (
@@ -49,15 +210,6 @@ export function TableSession() {
       </Layout>
     );
   }
-
-  const formatTime = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hours.toString().padStart(2, '0')}:${minutes
-      .toString()
-      .padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
 
   const timeInHours = table.elapsedSeconds / 3600;
   const tableCost = timeInHours * getTableRate(table.type);
@@ -77,8 +229,26 @@ export function TableSession() {
   };
 
   const handleEndSession = () => {
+    const timeInHours = table.elapsedSeconds / 3600;
+    const tCost = timeInHours * getTableRate(table.type);
+    const pCost = table.products.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+    // 1. Snapshot the data into local state
+    setReceipt({
+      tableName: table.name,
+      tableType: table.type,
+      elapsedSeconds: table.elapsedSeconds,
+      products: [...table.products],
+      tableCost: tCost,
+      productsCost: pCost,
+      totalCost: tCost + pCost,
+      endTime: new Date(),
+    });
+
+    // 2. End the session — this will cause table to disappear from context,
+    //    but `receipt` state is now set so the receipt branch renders instead
+    //    of the "mesa no encontrada" fallback.
     endTableSession(table.id);
-    navigate('/tables');
   };
 
   const openProductModal = (product: any) => {
